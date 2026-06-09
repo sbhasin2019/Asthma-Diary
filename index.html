@@ -207,6 +207,19 @@ body, body *{font-family:'Inter',system-ui,-apple-system,sans-serif;}
 .disclaimer{display:flex;align-items:flex-start;gap:7px;font-size:11.5px;color:var(--faint);line-height:1.5;margin:8px 2px 0;}
 .disclaimer svg{flex-shrink:0;margin-top:2px;}
 
+.head-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+.bell-btn{position:relative;flex-shrink:0;width:42px;height:42px;border-radius:12px;border:1px solid var(--line);
+  background:var(--surface);color:var(--teal-deep);display:flex;align-items:center;justify-content:center;cursor:pointer;margin-top:6px;box-shadow:var(--shadow);}
+.bell-btn:active{transform:scale(.96);}
+.bell-on{position:absolute;top:8px;right:8px;width:9px;height:9px;border-radius:50%;background:var(--green);border:2px solid var(--surface);}
+.rem-rows{display:flex;flex-direction:column;gap:9px;}
+.rem-row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface);
+  border:1px solid var(--line);border-radius:13px;padding:13px 14px;font-size:13.5px;}
+.rem-row > span:first-child{display:flex;align-items:center;gap:8px;font-weight:600;color:var(--ink);}
+.rem-row > span:last-child{color:var(--muted);font-size:12.5px;text-align:right;}
+.rem-status{font-size:12.5px;color:var(--muted);line-height:1.5;margin:4px 0 0;}
+.primary:disabled{opacity:.6;}
+
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:92px;z-index:80;display:flex;align-items:center;gap:8px;
   max-width:380px;width:calc(100% - 40px);background:var(--ink);color:#fff;border-radius:13px;padding:12px 15px;
   font-size:13.5px;font-weight:500;box-shadow:0 8px 24px rgba(20,40,45,.25);animation:toastIn .25s ease;}
@@ -265,6 +278,69 @@ function saveData(d) {
 }
 const clone = (o) => (typeof structuredClone === "function" ? structuredClone(o) : JSON.parse(JSON.stringify(o)));
 
+/* ---------- reminders (on-device scheduled notifications) ---------- */
+const REM_KEY = "asthma_zoya_reminders";
+// JS getDay(): Sun=0, Mon=1 ... Sat=6
+const REM_RULES = [
+  { id: "am_wd", label: "Morning Foracort — 2 puffs", hour: 7, min: 0, days: [1, 2, 3, 4, 5] },
+  { id: "am_we", label: "Morning Foracort — 2 puffs", hour: 9, min: 0, days: [0, 6] },
+  { id: "pm", label: "Evening Foracort — 2 puffs", hour: 20, min: 0, days: [0, 1, 2, 3, 4, 5, 6] },
+];
+const triggersSupported = () => typeof window !== "undefined" && "Notification" in window && "TimestampTrigger" in window;
+
+async function clearReminders() {
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) return;
+    const ns = await reg.getNotifications({ includeTriggered: true });
+    ns.forEach((n) => { if (n.tag && n.tag.indexOf("zdose-") === 0) n.close(); });
+  } catch (e) {}
+}
+async function scheduleReminders() {
+  if (!triggersSupported() || Notification.permission !== "granted") return false;
+  const reg = await navigator.serviceWorker.getRegistration();
+  if (!reg) return false;
+  await clearReminders();
+  const now = Date.now();
+  for (let off = 0; off < 14; off++) {
+    const d = new Date(); d.setDate(d.getDate() + off);
+    const dow = d.getDay();
+    for (const r of REM_RULES) {
+      if (!r.days.includes(dow)) continue;
+      const t = new Date(d); t.setHours(r.hour, r.min, 0, 0);
+      const ts = t.getTime();
+      if (ts <= now + 2000) continue;
+      try {
+        await reg.showNotification("Zoya — asthma", {
+          tag: `zdose-${keyOf(t)}-${r.id}`, body: r.label, requireInteraction: false,
+          showTrigger: new TimestampTrigger(ts), data: { url: location.href },
+        });
+      } catch (e) {}
+    }
+  }
+  return true;
+}
+async function enableReminders() {
+  if (!("Notification" in window)) return { ok: false, reason: "unsupported" };
+  let perm = Notification.permission;
+  if (perm !== "granted") perm = await Notification.requestPermission();
+  if (perm !== "granted") return { ok: false, reason: "denied" };
+  if (!triggersSupported()) return { ok: false, reason: "notriggers" };
+  const ok = await scheduleReminders();
+  return { ok, reason: ok ? "" : "failed" };
+}
+async function testNotification() {
+  if (!("Notification" in window)) return false;
+  let perm = Notification.permission;
+  if (perm !== "granted") perm = await Notification.requestPermission();
+  if (perm !== "granted") return false;
+  const reg = await navigator.serviceWorker.getRegistration();
+  if (!reg) return false;
+  const opts = { tag: "ztest", body: "Test reminder — this is how a dose alert will look.", data: { url: location.href } };
+  if (triggersSupported()) opts.showTrigger = new TimestampTrigger(Date.now() + 5000);
+  try { await reg.showNotification("Zoya — asthma", opts); return true; } catch (e) { return false; }
+}
+
 /* ---------- date helpers ---------- */
 const pad = (n) => String(n).padStart(2, "0");
 const keyOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -295,6 +371,7 @@ function Ico({ n, s = 20 }) {
     case "doc": return <svg {...p}><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4M9 13h6M9 17h6" /></svg>;
     case "download": return <svg {...p}><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>;
     case "upload": return <svg {...p}><path d="M12 21V9M7 14l5-5 5 5M5 3h14" /></svg>;
+    case "bell": return <svg {...p}><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>;
     default: return null;
   }
 }
@@ -306,6 +383,8 @@ function App() {
   const [sheet, setSheet] = useState(null);
   const [now, setNow] = useState(new Date());
   const [toast, setToast] = useState(null);
+  const [remOpen, setRemOpen] = useState(false);
+  const [remEnabled, setRemEnabled] = useState(() => { try { return localStorage.getItem(REM_KEY) === "1"; } catch (e) { return false; } });
 
   const showToast = useCallback((msg, warn = false) => {
     setToast({ msg, warn });
@@ -314,6 +393,13 @@ function App() {
 
   useEffect(() => { setData(loadData()); }, []);
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 60000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("sw.js")
+        .then(() => { if (remEnabled) scheduleReminders(); })
+        .catch(() => {});
+    }
+  }, []);
 
   const update = useCallback((mutator, okMsg) => {
     setData((prev) => {
@@ -361,7 +447,7 @@ function App() {
   return (
     <div className="app">
       <div className="phone">
-        {tab === "today" && <Today now={now} todayLog={todayLog} todayEpisodes={todayEpisodes} onToggle={toggleDose} onLog={() => setSheet({})} onOpenEpisode={(e) => setSheet({ episode: e })} />}
+        {tab === "today" && <Today now={now} todayLog={todayLog} todayEpisodes={todayEpisodes} onToggle={toggleDose} onLog={() => setSheet({})} onOpenEpisode={(e) => setSheet({ episode: e })} onReminders={() => setRemOpen(true)} remEnabled={remEnabled} />}
         {tab === "history" && <History data={data} onOpenEpisode={(e) => setSheet({ episode: e })} />}
         {tab === "summary" && <Summary data={data} onRestore={restoreBackup} showToast={showToast} />}
 
@@ -374,18 +460,23 @@ function App() {
 
       {sheet && <EpisodeSheet existing={sheet.episode} onClose={() => setSheet(null)} onSave={saveEpisode} onDelete={deleteEpisode} />}
 
+      {remOpen && <ReminderSheet onClose={() => setRemOpen(false)} showToast={showToast} enabled={remEnabled} setEnabled={setRemEnabled} />}
+
       {toast && <div className={`toast ${toast.warn ? "warn" : ""}`}>{toast.warn ? <Ico n="alert" s={16} /> : <Ico n="check" s={16} />}<span>{toast.msg}</span></div>}
     </div>
   );
 }
 
 /* ---------- Today ---------- */
-function Today({ now, todayLog, todayEpisodes, onToggle, onLog, onOpenEpisode }) {
+function Today({ now, todayLog, todayEpisodes, onToggle, onLog, onOpenEpisode, onReminders, remEnabled }) {
   const takenCount = DOSES.filter((d) => todayLog[d.id] && todayLog[d.id].taken).length;
   const complete = takenCount === DOSES.length;
   return (
     <div className="screen">
-      <header className="head"><p className="eyebrow">{prettyDate(now)}</p><h1 className="title">{CHILD}'s day</h1></header>
+      <header className="head head-row">
+        <div><p className="eyebrow">{prettyDate(now)}</p><h1 className="title">{CHILD}'s day</h1></div>
+        <button className="bell-btn" onClick={onReminders} aria-label="Reminders"><Ico n="bell" s={22} />{remEnabled && <span className="bell-on" />}</button>
+      </header>
       <BreathRing taken={takenCount} total={DOSES.length} />
       <div className="doses">
         {DOSES.map((dose) => {
@@ -761,6 +852,66 @@ function EpisodeSheet({ existing, onClose, onSave, onDelete }) {
           <Field label="Peak flow (PEF) — optional"><input className="num-input" type="number" inputMode="numeric" placeholder="e.g. 220" value={pef} onChange={(e) => setPef(e.target.value)} /></Field>
           <Field label="Notes — optional"><textarea className="notes-input" rows={3} placeholder="Anything else worth remembering" value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
           {existing && <button className="delete-btn" onClick={() => onDelete(existing.id)}><Ico n="trash" s={16} /> Delete this episode</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReminderSheet({ onClose, showToast, enabled, setEnabled }) {
+  const [busy, setBusy] = useState(false);
+  const supported = triggersSupported();
+  const blocked = "Notification" in window && Notification.permission === "denied";
+
+  async function toggle() {
+    if (enabled) {
+      await clearReminders();
+      try { localStorage.setItem(REM_KEY, "0"); } catch (e) {}
+      setEnabled(false); showToast("Reminders turned off");
+      return;
+    }
+    setBusy(true);
+    const res = await enableReminders();
+    setBusy(false);
+    if (res.ok) { try { localStorage.setItem(REM_KEY, "1"); } catch (e) {} setEnabled(true); showToast("Reminders on"); }
+    else if (res.reason === "denied") showToast("Notifications are blocked — allow them in your browser's site settings, then try again", true);
+    else if (res.reason === "notriggers" || res.reason === "unsupported") showToast("This browser can't schedule reminders — use your phone's Clock app instead", true);
+    else showToast("Couldn't set reminders", true);
+  }
+  async function test() {
+    const ok = await testNotification();
+    showToast(ok ? "Test sent — watch for it in ~5 seconds" : "Couldn't send a test — check notification permission", !ok);
+  }
+
+  return (
+    <div className="sheet-scrim">
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-head">
+          <button className="cancel-btn" onClick={onClose}>Close</button>
+          <h2>Reminders</h2>
+          <span style={{ width: 52 }} />
+        </div>
+        <div className="sheet-body">
+          <div className="rem-rows">
+            <div className="rem-row"><span><Ico n="sun" s={16} /> Morning · Foracort</span><span>7:00 weekdays · 9:00 weekends</span></div>
+            <div className="rem-row"><span><Ico n="moon" s={16} /> Evening · Foracort</span><span>8:00 every day</span></div>
+          </div>
+
+          <button className="primary" disabled={busy} onClick={toggle} style={enabled ? { background: "var(--severe)" } : {}}>
+            <Ico n="bell" s={17} /> {busy ? "Setting up…" : enabled ? "Turn reminders off" : "Turn reminders on"}
+          </button>
+          <button className="ghost" onClick={test}>Send a test notification</button>
+
+          <p className="rem-status">
+            {enabled
+              ? "On — the next two weeks of dose times are scheduled on this phone, and refresh each time you open the app."
+              : supported
+                ? "Scheduled reminders are supported on this browser."
+                : "This browser can't schedule reminders on its own — use your phone's Clock app for the alerts."}
+          </p>
+          <p className="backup-note">
+            These fire on whichever phone you switch them on. They won't ring on the Mac. If you ever stop getting them, just open the app once to top them up{blocked ? ", and re-allow notifications in your browser's site settings" : ""}.
+          </p>
         </div>
       </div>
     </div>
