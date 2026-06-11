@@ -227,6 +227,41 @@ body, body *{font-family:'Inter',system-ui,-apple-system,sans-serif;}
 .rem-status{font-size:12.5px;color:var(--muted);line-height:1.5;margin:4px 0 0;}
 .primary:disabled{opacity:.6;}
 
+.dose-banner{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
+  background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:12px 14px;
+  cursor:pointer;box-shadow:var(--shadow);font-family:inherit;margin-top:-2px;}
+.dose-banner:active{transform:scale(.99);}
+.db-left{display:flex;align-items:center;gap:11px;min-width:0;}
+.db-ic{width:34px;height:34px;border-radius:10px;background:var(--teal-soft);color:var(--teal-deep);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.db-text{display:flex;flex-direction:column;min-width:0;}
+.db-cur{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;}
+.db-val{font-size:14px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.db-link{font-size:13px;font-weight:600;color:var(--teal);flex-shrink:0;}
+
+.cur-dose{display:flex;flex-direction:column;gap:3px;background:var(--teal-soft);border-radius:15px;padding:16px;}
+.cur-dose-label{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--teal-deep);font-weight:700;}
+.cur-dose-val{font-family:'Fraunces',serif;font-size:23px;font-weight:500;color:var(--ink);line-height:1.1;}
+.cur-dose-since{font-size:12.5px;color:var(--teal-deep);}
+.change-form{display:flex;flex-direction:column;gap:16px;background:var(--surface);border:1px solid var(--line);border-radius:15px;padding:15px;}
+.change-form-head{display:flex;align-items:center;justify-content:space-between;font-size:14px;font-weight:600;color:var(--ink);}
+.puff-row{display:flex;gap:14px;}
+.puff-col{display:flex;flex-direction:column;gap:9px;flex:1;}
+.puff-col .field-label{display:flex;align-items:center;gap:6px;}
+.reg-list{display:flex;flex-direction:column;gap:9px;}
+.reg-row{display:flex;align-items:stretch;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:13px;overflow:hidden;}
+.reg-row.editing{border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-soft);}
+.reg-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;background:none;border:none;
+  text-align:left;padding:13px 14px;cursor:pointer;font-family:inherit;color:inherit;}
+.reg-top{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:var(--ink);}
+.reg-current{font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  background:var(--teal-soft);color:var(--teal-deep);border-radius:6px;padding:2px 7px;}
+.reg-when{font-size:12.5px;color:var(--muted);}
+.reg-del{flex-shrink:0;width:46px;border:none;border-left:1px solid var(--line);background:var(--surface);
+  color:var(--severe);cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.reg-del:disabled{color:var(--faint);opacity:.4;cursor:default;}
+.reg-del:active:not(:disabled){background:#FBF1EF;}
+
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:92px;z-index:80;display:flex;align-items:center;gap:8px;
   max-width:380px;width:calc(100% - 40px);background:var(--ink);color:#fff;border-radius:13px;padding:12px 15px;
   font-size:13.5px;font-weight:500;box-shadow:0 8px 24px rgba(20,40,45,.25);animation:toastIn .25s ease;}
@@ -275,15 +310,43 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /* ---------- storage ---------- */
+function normalize(d) {
+  if (!d || typeof d !== "object") d = {};
+  if (!d.doseLog) d.doseLog = {};
+  if (!Array.isArray(d.episodes)) d.episodes = [];
+  if (!Array.isArray(d.regimen) || d.regimen.length === 0) {
+    const keys = [...Object.keys(d.doseLog), ...d.episodes.map((e) => keyOf(new Date(e.at)))].sort();
+    const from = keys.length ? keys[0] : todayKey();
+    d.regimen = [{ id: "r_seed", from, morning: 2, evening: 2 }];
+  }
+  return d;
+}
 function loadData() {
-  try { const r = localStorage.getItem(STORE_KEY); if (r) return JSON.parse(r); } catch (e) {}
-  return { doseLog: {}, episodes: [] };
+  try { const r = localStorage.getItem(STORE_KEY); if (r) return normalize(JSON.parse(r)); } catch (e) {}
+  return normalize({ doseLog: {}, episodes: [] });
 }
 function saveData(d) {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(d)); return true; }
   catch (e) { console.error(e); return false; }
 }
 const clone = (o) => (typeof structuredClone === "function" ? structuredClone(o) : JSON.parse(JSON.stringify(o)));
+
+/* ---------- regimen (dosage over time) ---------- */
+const puffLabel = (n) => `${n} puff${Number(n) === 1 ? "" : "s"}`;
+function regimenSorted(regimen) { return [...(regimen || [])].sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0)); }
+function regimenOn(regimen, dateKey) {
+  const s = regimenSorted(regimen);
+  if (!s.length) return { morning: 2, evening: 2 };
+  let cur = s[0];
+  for (const r of s) { if (r.from <= dateKey) cur = r; else break; }
+  return cur;
+}
+const currentRegimen = (regimen) => regimenOn(regimen, todayKey());
+function regimenText(r) {
+  return r.morning === r.evening
+    ? `${puffLabel(r.morning)} morning & evening`
+    : `${puffLabel(r.morning)} morning / ${puffLabel(r.evening)} evening`;
+}
 
 /* ---------- reminders (on-device scheduled notifications) ---------- */
 const REM_KEY = "asthma_zoya_reminders";
@@ -308,6 +371,7 @@ async function scheduleReminders() {
   const reg = await navigator.serviceWorker.getRegistration();
   if (!reg) return false;
   await clearReminders();
+  const cur = currentRegimen(loadData().regimen);
   const now = Date.now();
   for (let off = 0; off < 14; off++) {
     const d = new Date(); d.setDate(d.getDate() + off);
@@ -317,9 +381,11 @@ async function scheduleReminders() {
       const t = new Date(d); t.setHours(r.hour, r.min, 0, 0);
       const ts = t.getTime();
       if (ts <= now + 2000) continue;
+      const slot = r.id === "pm" ? "Evening" : "Morning";
+      const puffs = r.id === "pm" ? cur.evening : cur.morning;
       try {
         await reg.showNotification("Zoya — asthma", {
-          tag: `zdose-${keyOf(t)}-${r.id}`, body: r.label, requireInteraction: false,
+          tag: `zdose-${keyOf(t)}-${r.id}`, body: `${slot} Foracort — ${puffLabel(puffs)}`, requireInteraction: false,
           showTrigger: new TimestampTrigger(ts), data: { url: location.href },
         });
       } catch (e) {}
@@ -379,6 +445,7 @@ function Ico({ n, s = 20 }) {
     case "download": return <svg {...p}><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>;
     case "upload": return <svg {...p}><path d="M12 21V9M7 14l5-5 5 5M5 3h14" /></svg>;
     case "bell": return <svg {...p}><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>;
+    case "pill": return <svg {...p}><path d="M10.5 20.5 21 10a4.95 4.95 0 1 0-7-7L3.5 13.5a4.95 4.95 0 1 0 7 7Z" /><path d="m8.5 8.5 7 7" /></svg>;
     default: return null;
   }
 }
@@ -392,6 +459,7 @@ function App() {
   const [toast, setToast] = useState(null);
   const [remOpen, setRemOpen] = useState(false);
   const [dayEdit, setDayEdit] = useState(null); // null | dateKey
+  const [doseOpen, setDoseOpen] = useState(false);
   const [remEnabled, setRemEnabled] = useState(() => { try { return localStorage.getItem(REM_KEY) === "1"; } catch (e) { return false; } });
 
   const showToast = useCallback((msg, warn = false) => {
@@ -469,11 +537,24 @@ function App() {
     }, "Day updated");
     setDayEdit(null);
   }
+  function saveRegimen(entry) {
+    update((d) => {
+      const e = { ...entry, morning: Number(entry.morning), evening: Number(entry.evening) };
+      if (e.id && d.regimen.some((r) => r.id === e.id)) d.regimen = d.regimen.map((r) => (r.id === e.id ? e : r));
+      else d.regimen.push({ ...e, id: e.id || ("r_" + Date.now()) });
+      d.regimen = regimenSorted(d.regimen);
+      return d;
+    }, "Dosage saved");
+    if (remEnabled) setTimeout(() => scheduleReminders(), 50);
+  }
+  function deleteRegimen(id) {
+    update((d) => { if (d.regimen.length > 1) d.regimen = d.regimen.filter((r) => r.id !== id); return d; }, "Dosage entry removed");
+  }
 
   return (
     <div className="app">
       <div className="phone">
-        {tab === "today" && <Today now={now} todayLog={todayLog} todayEpisodes={todayEpisodes} onToggle={toggleDose} onLog={() => setSheet({})} onOpenEpisode={(e) => setSheet({ episode: e })} onReminders={() => setRemOpen(true)} remEnabled={remEnabled} />}
+        {tab === "today" && <Today now={now} todayLog={todayLog} todayEpisodes={todayEpisodes} regimen={data.regimen} onToggle={toggleDose} onLog={() => setSheet({})} onOpenEpisode={(e) => setSheet({ episode: e })} onReminders={() => setRemOpen(true)} onDosage={() => setDoseOpen(true)} remEnabled={remEnabled} />}
         {tab === "history" && <History data={data} onOpenEpisode={(e) => setSheet({ episode: e })} onEditDay={(k) => setDayEdit(k)} />}
         {tab === "summary" && <Summary data={data} onRestore={restoreBackup} showToast={showToast} />}
 
@@ -488,7 +569,9 @@ function App() {
 
       {remOpen && <ReminderSheet onClose={() => setRemOpen(false)} showToast={showToast} enabled={remEnabled} setEnabled={setRemEnabled} />}
 
-      {dayEdit && <DayEditor initialKey={dayEdit} doseLog={data.doseLog} onClose={() => setDayEdit(null)} onSave={setDay} />}
+      {dayEdit && <DayEditor initialKey={dayEdit} doseLog={data.doseLog} regimen={data.regimen} onClose={() => setDayEdit(null)} onSave={setDay} />}
+
+      {doseOpen && <DosageSheet regimen={data.regimen} onClose={() => setDoseOpen(false)} onSave={saveRegimen} onDelete={deleteRegimen} />}
 
       {toast && <div className={`toast ${toast.warn ? "warn" : ""}`}>{toast.warn ? <Ico n="alert" s={16} /> : <Ico n="check" s={16} />}<span>{toast.msg}</span></div>}
     </div>
@@ -496,9 +579,10 @@ function App() {
 }
 
 /* ---------- Today ---------- */
-function Today({ now, todayLog, todayEpisodes, onToggle, onLog, onOpenEpisode, onReminders, remEnabled }) {
+function Today({ now, todayLog, todayEpisodes, regimen, onToggle, onLog, onOpenEpisode, onReminders, onDosage, remEnabled }) {
   const takenCount = DOSES.filter((d) => todayLog[d.id] && todayLog[d.id].taken).length;
   const complete = takenCount === DOSES.length;
+  const reg = currentRegimen(regimen);
   return (
     <div className="screen">
       <header className="head head-row">
@@ -510,12 +594,13 @@ function Today({ now, todayLog, todayEpisodes, onToggle, onLog, onOpenEpisode, o
         {DOSES.map((dose) => {
           const rec = todayLog[dose.id]; const taken = !!(rec && rec.taken);
           const due = !taken && now.getHours() >= dose.dueHour;
+          const puffs = dose.id === "evening" ? reg.evening : reg.morning;
           return (
             <button key={dose.id} className={`dose ${taken ? "done" : ""} ${due ? "due" : ""}`} onClick={() => onToggle(dose.id)}>
               <span className="dose-ic"><Ico n={dose.icon} /></span>
               <span className="dose-text">
                 <span className="dose-label">{dose.label} · {dose.med}</span>
-                <span className="dose-detail">{taken ? `Taken at ${prettyTime(rec.at)}` : `${dose.detail}${due ? " · due now" : ""}`}</span>
+                <span className="dose-detail">{taken ? `Taken at ${prettyTime(rec.at)}` : `${puffLabel(puffs)}${due ? " · due now" : ""}`}</span>
               </span>
               <span className="dose-check">{taken ? <Ico n="check" s={18} /> : <span className="empty-dot" />}</span>
             </button>
@@ -523,6 +608,13 @@ function Today({ now, todayLog, todayEpisodes, onToggle, onLog, onOpenEpisode, o
         })}
         {complete && <p className="all-done">Both doses done. Nice and steady.</p>}
       </div>
+      <button className="dose-banner" onClick={onDosage}>
+        <span className="db-left">
+          <span className="db-ic"><Ico n="pill" s={16} /></span>
+          <span className="db-text"><span className="db-cur">Current dosage</span><span className="db-val">{regimenText(reg)}</span></span>
+        </span>
+        <span className="db-link">Change ›</span>
+      </button>
       <button className="primary log-btn" onClick={onLog}><Ico n="plus" s={18} /> Log an episode</button>
       {todayEpisodes.length > 0 && (
         <section className="today-eps">
@@ -787,13 +879,24 @@ function computeStats(data, range) {
     if (e.pef) { const d = new Date(e.at); pefPoints.push({ label: `${d.getDate()}/${d.getMonth() + 1}`, pef: Number(e.pef) }); }
   }
   const top = (obj, n) => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n);
-  return { given, expected, missed, adherence, episodes, sevCount, relieverTotal, topActivities: top(actCount, 3), topSymptoms: top(symCount, 4), pefPoints, start, now };
+  return { given, expected, missed, adherence, episodes, sevCount, relieverTotal, topActivities: top(actCount, 3), topSymptoms: top(symCount, 4), pefPoints, start, now, regimen: data.regimen };
 }
 
 function buildReport(s, range) {
   const fmt = (d) => `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
   const header = range === 0 ? `${CHILD} — Asthma summary (all records to ${fmt(s.now)})` : `${CHILD} — Asthma summary (${fmt(s.start)} – ${fmt(s.now)})`;
-  const lines = [header, "", "PREVENTER — Foracort, 2 puffs morning & evening", `  Adherence: ${s.adherence}%  (${s.given} of ${s.expected} doses)`, `  Doses missed: ${s.missed}`, "", `EPISODES: ${s.episodes.length}`];
+  const reg = regimenSorted(s.regimen);
+  const lines = [header, "", "PREVENTER — Foracort"];
+  if (reg.length) {
+    const cur = reg[reg.length - 1];
+    const fmtK = (k) => { const d = new Date(k + "T00:00:00"); return fmt(d); };
+    lines.push(`  Current dose: ${regimenText(cur)} (${reg.length > 1 ? "changed" : "since"} ${fmtK(cur.from)})`);
+    for (let i = reg.length - 2; i >= 0; i--) {
+      const end = new Date(reg[i + 1].from + "T00:00:00"); end.setDate(end.getDate() - 1);
+      lines.push(`  Earlier: ${regimenText(reg[i])} (${fmtK(reg[i].from)} – ${fmt(end)})`);
+    }
+  }
+  lines.push(`  Adherence: ${s.adherence}%  (${s.given} of ${s.expected} doses)`, `  Doses missed: ${s.missed}`, "", `EPISODES: ${s.episodes.length}`);
   if (s.episodes.length) {
     lines.push(`  Severity — ${SEVERITIES.map((x) => `${x.label} ${s.sevCount[x.id] || 0}`).join(", ")}`);
     lines.push(`  Reliever (Levolin) puffs used: ${s.relieverTotal}`);
@@ -956,12 +1059,13 @@ function readDay(log, k) {
   return v;
 }
 
-function DayEditor({ initialKey, doseLog, onClose, onSave }) {
+function DayEditor({ initialKey, doseLog, regimen, onClose, onSave }) {
   const [dateStr, setDateStr] = useState(initialKey || todayKey());
   const [vals, setVals] = useState(() => readDay(doseLog, initialKey || todayKey()));
   useEffect(() => { setVals(readDay(doseLog, dateStr)); }, [dateStr]);
   const d = new Date(dateStr + "T00:00:00");
   const future = dateStr > todayKey();
+  const reg = regimenOn(regimen, dateStr);
 
   return (
     <div className="sheet-scrim">
@@ -974,17 +1078,18 @@ function DayEditor({ initialKey, doseLog, onClose, onSave }) {
         <div className="sheet-body">
           <Field label="Date">
             <input className="dt-input" type="date" max={todayKey()} value={dateStr} onChange={(e) => setDateStr(e.target.value)} />
-            <p className="rem-status" style={{ margin: 0 }}>{prettyDate(d)}{future ? " — can't log a future day" : ""}</p>
+            <p className="rem-status" style={{ margin: 0 }}>{prettyDate(d)}{future ? " — can't log a future day" : ` · prescribed ${regimenText(reg)}`}</p>
           </Field>
           <Field label="Foracort doses taken">
             {DOSES.map((dose) => {
               const on = !!vals[dose.id];
+              const puffs = dose.id === "evening" ? reg.evening : reg.morning;
               return (
                 <button key={dose.id} className={`dose ${on ? "done" : ""}`} onClick={() => setVals((p) => ({ ...p, [dose.id]: !p[dose.id] }))}>
                   <span className="dose-ic"><Ico n={dose.icon} /></span>
                   <span className="dose-text">
                     <span className="dose-label">{dose.label} · {dose.med}</span>
-                    <span className="dose-detail">{on ? "Marked taken" : "Not taken"}</span>
+                    <span className="dose-detail">{on ? `Marked taken (${puffLabel(puffs)})` : "Not taken"}</span>
                   </span>
                   <span className="dose-check">{on ? <Ico n="check" s={18} /> : <span className="empty-dot" />}</span>
                 </button>
@@ -992,6 +1097,82 @@ function DayEditor({ initialKey, doseLog, onClose, onSave }) {
             })}
           </Field>
           <p className="backup-note">Tap each dose to flip it. The bar over that date in History updates straight away — green for both, amber for one, red for none.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DosageSheet({ regimen, onClose, onSave, onDelete }) {
+  const sorted = regimenSorted(regimen);
+  const current = sorted[sorted.length - 1] || { morning: 2, evening: 2, from: todayKey() };
+  const blank = () => ({ id: null, from: todayKey(), morning: current.morning, evening: current.evening });
+  const [changing, setChanging] = useState(false);
+  const [form, setForm] = useState(blank);
+  const editing = !!form.id;
+  const prettyK = (k) => { const d = new Date(k + "T00:00:00"); return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`; };
+  function periodText(i) {
+    const r = sorted[i], next = sorted[i + 1];
+    if (!next) return `since ${prettyK(r.from)}`;
+    const end = new Date(next.from + "T00:00:00"); end.setDate(end.getDate() - 1);
+    return `${prettyK(r.from)} – ${end.getDate()} ${MONTHS[end.getMonth()]} ${end.getFullYear()}`;
+  }
+  function step(which, delta) { setForm((f) => ({ ...f, [which]: Math.max(1, Math.min(8, Number(f[which]) + delta)) })); }
+  function startChange() { setForm(blank()); setChanging(true); }
+  function startEdit(r) { setForm({ id: r.id, from: r.from, morning: r.morning, evening: r.evening }); setChanging(true); }
+  function cancelChange() { setForm(blank()); setChanging(false); }
+  function save() { if (!form.from) return; onSave(form); setForm(blank()); setChanging(false); }
+  const rows = sorted.map((r, i) => ({ r, text: periodText(i), current: i === sorted.length - 1 })).reverse();
+
+  return (
+    <div className="sheet-scrim">
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-head">
+          <button className="cancel-btn" onClick={onClose}>Close</button>
+          <h2>Dosage</h2>
+          {changing ? <button className="text-btn" onClick={save}>{editing ? "Update" : "Save"}</button> : <span style={{ width: 52 }} />}
+        </div>
+        <div className="sheet-body">
+          <div className="cur-dose">
+            <span className="cur-dose-label">Current dosage</span>
+            <span className="cur-dose-val">{regimenText(current)}</span>
+            <span className="cur-dose-since">{sorted.length > 1 ? "Changed on" : "In place since"} {prettyK(current.from)}</span>
+          </div>
+
+          {!changing && <button className="primary" onClick={startChange}><Ico n="pill" s={17} /> Change dosage</button>}
+
+          {changing && (
+            <div className="change-form">
+              <div className="change-form-head">{editing ? "Edit dose change" : "New dose change"}<button className="cancel-btn" onClick={cancelChange}>Cancel</button></div>
+              <Field label="Date the dosage changed">
+                <input className="dt-input" type="date" max={todayKey()} value={form.from} onChange={(e) => setForm((f) => ({ ...f, from: e.target.value }))} />
+              </Field>
+              <div className="puff-row">
+                <div className="puff-col">
+                  <span className="field-label"><Ico n="sun" s={14} /> Morning</span>
+                  <div className="stepper"><button onClick={() => step("morning", -1)}>−</button><span>{form.morning}</span><button onClick={() => step("morning", 1)}>+</button></div>
+                </div>
+                <div className="puff-col">
+                  <span className="field-label"><Ico n="moon" s={14} /> Evening</span>
+                  <div className="stepper"><button onClick={() => step("evening", -1)}>−</button><span>{form.evening}</span><button onClick={() => step("evening", 1)}>+</button></div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <h2 className="section-h" style={{ marginTop: "6px" }}>Dose history</h2>
+          <div className="reg-list">
+            {rows.map(({ r, text, current: isCur }) => (
+              <div key={r.id} className={`reg-row ${form.id === r.id ? "editing" : ""}`}>
+                <button className="reg-main" onClick={() => startEdit(r)}>
+                  <span className="reg-top">{regimenText(r)}{isCur && <span className="reg-current">Current</span>}</span>
+                  <span className="reg-when">{text}</span>
+                </button>
+                <button className="reg-del" disabled={sorted.length <= 1} onClick={() => { onDelete(r.id); if (form.id === r.id) cancelChange(); }}><Ico n="trash" s={15} /></button>
+              </div>
+            ))}
+          </div>
+          <p className="backup-note">Each change applies from its date until the next one. History, reminders, and the doctor summary all use the dose that was in effect on each day.</p>
         </div>
       </div>
     </div>
