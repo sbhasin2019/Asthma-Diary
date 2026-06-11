@@ -97,7 +97,14 @@ body, body *{font-family:'Inter',system-ui,-apple-system,sans-serif;}
 .empty{font-size:14px;color:var(--muted);padding:6px 2px;}
 
 .strip{display:flex;justify-content:space-between;gap:3px;}
-.strip-col{display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;}
+.strip-col{display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;background:none;border:none;
+  cursor:pointer;padding:5px 0;font:inherit;color:inherit;border-radius:8px;transition:background .15s;}
+.strip-col:active{background:var(--teal-soft);}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px;}
+.mini-btn{display:flex;align-items:center;gap:5px;background:var(--teal-soft);color:var(--teal-deep);border:none;
+  border-radius:9px;padding:7px 11px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;}
+.mini-btn:active{transform:scale(.96);}
+.strip-key{font-size:11.5px;color:var(--faint);margin:11px 0 0;text-align:center;line-height:1.4;}
 .dosebar{width:100%;max-width:20px;height:9px;border-radius:3px;background:var(--line);}
 .dosebar.both{background:var(--green);}
 .dosebar.one{background:var(--moderate);}
@@ -384,6 +391,7 @@ function App() {
   const [now, setNow] = useState(new Date());
   const [toast, setToast] = useState(null);
   const [remOpen, setRemOpen] = useState(false);
+  const [dayEdit, setDayEdit] = useState(null); // null | dateKey
   const [remEnabled, setRemEnabled] = useState(() => { try { return localStorage.getItem(REM_KEY) === "1"; } catch (e) { return false; } });
 
   const showToast = useCallback((msg, warn = false) => {
@@ -443,12 +451,30 @@ function App() {
     }
     setData(obj); saveData(obj); showToast("Backup restored");
   }
+  function setDay(dateKey, vals) {
+    update((d) => {
+      const day = { ...(d.doseLog[dateKey] || {}) };
+      DOSES.forEach((dose) => {
+        if (vals[dose.id]) {
+          if (!day[dose.id] || !day[dose.id].taken) {
+            const dt = new Date(dateKey + "T00:00:00"); dt.setHours(dose.dueHour, 0, 0, 0);
+            day[dose.id] = { taken: true, at: dt.toISOString() };
+          }
+        } else {
+          delete day[dose.id];
+        }
+      });
+      if (Object.keys(day).length) d.doseLog[dateKey] = day; else delete d.doseLog[dateKey];
+      return d;
+    }, "Day updated");
+    setDayEdit(null);
+  }
 
   return (
     <div className="app">
       <div className="phone">
         {tab === "today" && <Today now={now} todayLog={todayLog} todayEpisodes={todayEpisodes} onToggle={toggleDose} onLog={() => setSheet({})} onOpenEpisode={(e) => setSheet({ episode: e })} onReminders={() => setRemOpen(true)} remEnabled={remEnabled} />}
-        {tab === "history" && <History data={data} onOpenEpisode={(e) => setSheet({ episode: e })} />}
+        {tab === "history" && <History data={data} onOpenEpisode={(e) => setSheet({ episode: e })} onEditDay={(k) => setDayEdit(k)} />}
         {tab === "summary" && <Summary data={data} onRestore={restoreBackup} showToast={showToast} />}
 
         <nav className="tabbar">
@@ -461,6 +487,8 @@ function App() {
       {sheet && <EpisodeSheet existing={sheet.episode} onClose={() => setSheet(null)} onSave={saveEpisode} onDelete={deleteEpisode} />}
 
       {remOpen && <ReminderSheet onClose={() => setRemOpen(false)} showToast={showToast} enabled={remEnabled} setEnabled={setRemEnabled} />}
+
+      {dayEdit && <DayEditor initialKey={dayEdit} doseLog={data.doseLog} onClose={() => setDayEdit(null)} onSave={setDay} />}
 
       {toast && <div className={`toast ${toast.warn ? "warn" : ""}`}>{toast.warn ? <Ico n="alert" s={16} /> : <Ico n="check" s={16} />}<span>{toast.msg}</span></div>}
     </div>
@@ -526,7 +554,7 @@ function BreathRing({ taken, total }) {
 }
 
 /* ---------- History ---------- */
-function History({ data, onOpenEpisode }) {
+function History({ data, onOpenEpisode, onEditDay }) {
   const relieverDays = useMemo(() => {
     const s = new Set();
     for (const e of data.episodes) if (Number(e.reliever) > 0) s.add(keyOf(new Date(e.at)));
@@ -557,16 +585,19 @@ function History({ data, onOpenEpisode }) {
     <div className="screen">
       <header className="head"><p className="eyebrow">Last 14 days</p><h1 className="title">History</h1></header>
       <section className="card">
-        <h2 className="section-h">Daily record</h2>
+        <div className="card-head">
+          <h2 className="section-h" style={{ margin: 0 }}>Daily record</h2>
+          <button className="mini-btn" onClick={() => onEditDay(todayKey())}><Ico n="pencil" s={13} /> Edit a day</button>
+        </div>
         <div className="strip">
-          {days.map(({ d, taken, reliever, episode, tracked }, i) => {
+          {days.map(({ d, taken, reliever, episode, tracked, k }, i) => {
             const cls = !tracked ? "pre" : taken === 2 ? "both" : taken === 1 ? "one" : "none";
             return (
-              <div key={i} className="strip-col">
+              <button key={i} className="strip-col" onClick={() => onEditDay(k)}>
                 <span className={`dosebar ${cls}`} />
                 <span className={`strip-day ${reliever ? "lev" : ""}`}>{d.getDate()}</span>
                 <span className={`ep-dot ${episode ? "on" : ""}`} />
-              </div>
+              </button>
             );
           })}
         </div>
@@ -577,6 +608,7 @@ function History({ data, onOpenEpisode }) {
           <span className="leg"><span className="leg-date">12</span> Levolin used</span>
           <span className="leg"><span className="leg-dot" /> Episode logged</span>
         </div>
+        <p className="strip-key">Tap any day — or "Edit a day" — to correct its Foracort doses</p>
       </section>
       <section className="ep-list">
         <h2 className="section-h">Episodes</h2>
@@ -912,6 +944,54 @@ function ReminderSheet({ onClose, showToast, enabled, setEnabled }) {
           <p className="backup-note">
             These fire on whichever phone you switch them on. They won't ring on the Mac. If you ever stop getting them, just open the app once to top them up{blocked ? ", and re-allow notifications in your browser's site settings" : ""}.
           </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function readDay(log, k) {
+  const day = log[k] || {}; const v = {};
+  DOSES.forEach((d) => { v[d.id] = !!(day[d.id] && day[d.id].taken); });
+  return v;
+}
+
+function DayEditor({ initialKey, doseLog, onClose, onSave }) {
+  const [dateStr, setDateStr] = useState(initialKey || todayKey());
+  const [vals, setVals] = useState(() => readDay(doseLog, initialKey || todayKey()));
+  useEffect(() => { setVals(readDay(doseLog, dateStr)); }, [dateStr]);
+  const d = new Date(dateStr + "T00:00:00");
+  const future = dateStr > todayKey();
+
+  return (
+    <div className="sheet-scrim">
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-head">
+          <button className="cancel-btn" onClick={onClose}>Cancel</button>
+          <h2>Edit doses</h2>
+          <button className="text-btn" onClick={() => onSave(dateStr, vals)} disabled={future}>Save</button>
+        </div>
+        <div className="sheet-body">
+          <Field label="Date">
+            <input className="dt-input" type="date" max={todayKey()} value={dateStr} onChange={(e) => setDateStr(e.target.value)} />
+            <p className="rem-status" style={{ margin: 0 }}>{prettyDate(d)}{future ? " — can't log a future day" : ""}</p>
+          </Field>
+          <Field label="Foracort doses taken">
+            {DOSES.map((dose) => {
+              const on = !!vals[dose.id];
+              return (
+                <button key={dose.id} className={`dose ${on ? "done" : ""}`} onClick={() => setVals((p) => ({ ...p, [dose.id]: !p[dose.id] }))}>
+                  <span className="dose-ic"><Ico n={dose.icon} /></span>
+                  <span className="dose-text">
+                    <span className="dose-label">{dose.label} · {dose.med}</span>
+                    <span className="dose-detail">{on ? "Marked taken" : "Not taken"}</span>
+                  </span>
+                  <span className="dose-check">{on ? <Ico n="check" s={18} /> : <span className="empty-dot" />}</span>
+                </button>
+              );
+            })}
+          </Field>
+          <p className="backup-note">Tap each dose to flip it. The bar over that date in History updates straight away — green for both, amber for one, red for none.</p>
         </div>
       </div>
     </div>
