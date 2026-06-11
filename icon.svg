@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bg" cx="38%" cy="30%" r="85%">
+      <stop offset="0%" stop-color="#27776A"/>
+      <stop offset="100%" stop-color="#1B564E"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <!-- breath ring -->
+  <circle cx="256" cy="256" r="150" fill="none" stroke="#F3F6EC" stroke-width="27"/>
+  <!-- leaf body -->
+  <path d="M256 178 C324 212 324 304 256 334 C188 304 188 212 256 178 Z" fill="#F3F6EC"/>
+  <!-- midrib -->
+  <path d="M256 192 L256 322" stroke="#1F6159" stroke-width="9" stroke-linecap="round"/>
+  <!-- veins -->
+  <path d="M256 240 L224 219 M256 240 L288 219 M256 286 L230 269 M256 286 L282 269"
+        stroke="#1F6159" stroke-width="6" stroke-linecap="round" fill="none"/>
+  <!-- stem accent -->
+  <path d="M256 334 L256 366" stroke="#E0A22B" stroke-width="12" stroke-linecap="round"/>
+</svg>
