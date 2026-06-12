@@ -51,10 +51,15 @@ body, body *{font-family:'Karla',system-ui,-apple-system,sans-serif;}
 .ring-cap{font-size:12.5px;color:var(--muted);margin-top:5px;letter-spacing:.02em;}
 
 .doses{display:flex;flex-direction:column;gap:10px;}
-.dose{display:flex;align-items:center;gap:13px;background:var(--surface);border:1px solid var(--line);
-  border-radius:16px;padding:14px 15px;text-align:left;cursor:pointer;box-shadow:var(--shadow);
-  transition:transform .12s ease, border-color .2s, background .2s;width:100%;font:inherit;color:inherit;}
-.dose:active{transform:scale(.985);}
+.dose{display:flex;align-items:stretch;background:var(--surface);border:1px solid var(--line);
+  border-radius:16px;overflow:hidden;box-shadow:var(--shadow);width:100%;
+  transition:border-color .2s, background .2s;}
+.dose-main{flex:1;min-width:0;display:flex;align-items:center;gap:13px;padding:14px 15px;
+  background:none;border:none;text-align:left;cursor:pointer;font:inherit;color:inherit;transition:transform .12s ease;}
+.dose-main:active{transform:scale(.99);}
+.dose-edit{flex-shrink:0;width:54px;border:none;border-left:1px solid var(--line);background:none;
+  color:var(--teal-deep);display:flex;align-items:center;justify-content:center;cursor:pointer;}
+.dose-edit:active{background:var(--teal-soft);}
 .dose-ic{width:38px;height:38px;border-radius:11px;background:var(--teal-soft);color:var(--teal-deep);
   display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .dose-text{display:flex;flex-direction:column;flex:1;min-width:0;}
@@ -65,9 +70,14 @@ body, body *{font-family:'Karla',system-ui,-apple-system,sans-serif;}
 .dose.done{background:#EAF1E0;border-color:#CFE0C3;}
 .dose.done .dose-ic{background:#E4EDDD;color:var(--green);}
 .dose.done .dose-check{background:var(--green);color:#fff;}
+.dose.done .dose-edit{border-left-color:#CFE0C3;}
 .dose.due{border-color:var(--moderate);box-shadow:0 0 0 3px rgba(215,154,43,.12),var(--shadow);}
 .dose.due .dose-detail{color:var(--moderate);font-weight:600;}
 .all-done{font-size:13.5px;color:var(--green);text-align:center;margin:2px 0 0;font-weight:500;}
+.dose-group{display:flex;flex-direction:column;gap:8px;}
+.dose-time{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 4px 2px;}
+.dose-time-lab{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);font-weight:600;}
+.time-in{width:auto !important;min-width:120px;}
 
 .primary{display:flex;align-items:center;justify-content:center;gap:8px;background:var(--teal);color:#fff;
   border:none;border-radius:14px;padding:15px;font-size:15.5px;font-weight:600;cursor:pointer;width:100%;
@@ -557,11 +567,12 @@ function App() {
     update((d) => {
       const day = { ...(d.doseLog[dateKey] || {}) };
       DOSES.forEach((dose) => {
-        if (vals[dose.id]) {
-          if (!day[dose.id] || !day[dose.id].taken) {
-            const dt = new Date(dateKey + "T00:00:00"); dt.setHours(dose.dueHour, 0, 0, 0);
-            day[dose.id] = { taken: true, at: dt.toISOString() };
-          }
+        const v = vals[dose.id];
+        if (v && v.taken) {
+          const parts = (v.time || (pad(dose.dueHour) + ":00")).split(":");
+          const h = Number(parts[0]) || 0, m = Number(parts[1]) || 0;
+          const dt = new Date(dateKey + "T00:00:00"); dt.setHours(h, m, 0, 0);
+          day[dose.id] = { taken: true, at: dt.toISOString() };
         } else {
           delete day[dose.id];
         }
@@ -588,7 +599,7 @@ function App() {
   return (
     <div className="app">
       <div className="phone">
-        {tab === "today" && <Today now={now} todayLog={todayLog} todayEpisodes={todayEpisodes} regimen={data.regimen} onToggle={toggleDose} onLog={() => setSheet({})} onOpenEpisode={(e) => setSheet({ episode: e })} onReminders={() => setRemOpen(true)} onDosage={() => setDoseOpen(true)} remEnabled={remEnabled} />}
+        {tab === "today" && <Today now={now} todayLog={todayLog} todayEpisodes={todayEpisodes} regimen={data.regimen} onToggle={toggleDose} onLog={() => setSheet({})} onOpenEpisode={(e) => setSheet({ episode: e })} onReminders={() => setRemOpen(true)} onDosage={() => setDoseOpen(true)} onEditDay={(k) => setDayEdit(k)} remEnabled={remEnabled} />}
         {tab === "history" && <History data={data} onOpenEpisode={(e) => setSheet({ episode: e })} onEditDay={(k) => setDayEdit(k)} />}
         {tab === "summary" && <Summary data={data} onRestore={restoreBackup} showToast={showToast} />}
 
@@ -613,7 +624,7 @@ function App() {
 }
 
 /* ---------- Today ---------- */
-function Today({ now, todayLog, todayEpisodes, regimen, onToggle, onLog, onOpenEpisode, onReminders, onDosage, remEnabled }) {
+function Today({ now, todayLog, todayEpisodes, regimen, onToggle, onLog, onOpenEpisode, onReminders, onDosage, onEditDay, remEnabled }) {
   const takenCount = DOSES.filter((d) => todayLog[d.id] && todayLog[d.id].taken).length;
   const complete = takenCount === DOSES.length;
   const reg = currentRegimen(regimen);
@@ -630,14 +641,17 @@ function Today({ now, todayLog, todayEpisodes, regimen, onToggle, onLog, onOpenE
           const due = !taken && now.getHours() >= dose.dueHour;
           const puffs = dose.id === "evening" ? reg.evening : reg.morning;
           return (
-            <button key={dose.id} className={`dose ${taken ? "done" : ""} ${due ? "due" : ""}`} onClick={() => onToggle(dose.id)}>
-              <span className="dose-ic"><Ico n={dose.icon} /></span>
-              <span className="dose-text">
-                <span className="dose-label">{dose.label} · {dose.med}</span>
-                <span className="dose-detail">{taken ? `Taken at ${prettyTime(rec.at)}` : `${puffLabel(puffs)}${due ? " · due now" : ""}`}</span>
-              </span>
-              <span className="dose-check">{taken ? <Ico n="check" s={18} /> : <span className="empty-dot" />}</span>
-            </button>
+            <div key={dose.id} className={`dose ${taken ? "done" : ""} ${due ? "due" : ""}`}>
+              <button className="dose-main" onClick={() => onToggle(dose.id)}>
+                <span className="dose-ic"><Ico n={dose.icon} /></span>
+                <span className="dose-text">
+                  <span className="dose-label">{dose.label} · {dose.med}</span>
+                  <span className="dose-detail">{taken ? `Taken at ${prettyTime(rec.at)}` : `${puffLabel(puffs)}${due ? " · due now" : ""}`}</span>
+                </span>
+                <span className="dose-check">{taken ? <Ico n="check" s={18} /> : <span className="empty-dot" />}</span>
+              </button>
+              {taken && <button className="dose-edit" onClick={() => onEditDay(todayKey())} aria-label="Edit time taken"><Ico n="clock" s={18} /></button>}
+            </div>
           );
         })}
         {complete && <p className="all-done">Both doses done. Nice and steady.</p>}
@@ -1116,7 +1130,13 @@ function ReminderSheet({ onClose, showToast, enabled, setEnabled }) {
 
 function readDay(log, k) {
   const day = log[k] || {}; const v = {};
-  DOSES.forEach((d) => { v[d.id] = !!(day[d.id] && day[d.id].taken); });
+  DOSES.forEach((d) => {
+    const rec = day[d.id];
+    const taken = !!(rec && rec.taken);
+    let time = pad(d.dueHour) + ":00";
+    if (taken && rec.at) { const dt = new Date(rec.at); time = pad(dt.getHours()) + ":" + pad(dt.getMinutes()); }
+    v[d.id] = { taken, time };
+  });
   return v;
 }
 
@@ -1143,21 +1163,31 @@ function DayEditor({ initialKey, doseLog, regimen, onClose, onSave }) {
           </Field>
           <Field label="Foracort doses taken">
             {DOSES.map((dose) => {
-              const on = !!vals[dose.id];
+              const on = !!vals[dose.id].taken;
               const puffs = dose.id === "evening" ? reg.evening : reg.morning;
               return (
-                <button key={dose.id} className={`dose ${on ? "done" : ""}`} onClick={() => setVals((p) => ({ ...p, [dose.id]: !p[dose.id] }))}>
-                  <span className="dose-ic"><Ico n={dose.icon} /></span>
-                  <span className="dose-text">
-                    <span className="dose-label">{dose.label} · {dose.med}</span>
-                    <span className="dose-detail">{on ? `Marked taken (${puffLabel(puffs)})` : "Not taken"}</span>
-                  </span>
-                  <span className="dose-check">{on ? <Ico n="check" s={18} /> : <span className="empty-dot" />}</span>
-                </button>
+                <div key={dose.id} className="dose-group">
+                  <div className={`dose ${on ? "done" : ""}`}>
+                    <button className="dose-main" onClick={() => setVals((p) => ({ ...p, [dose.id]: { ...p[dose.id], taken: !p[dose.id].taken } }))}>
+                      <span className="dose-ic"><Ico n={dose.icon} /></span>
+                      <span className="dose-text">
+                        <span className="dose-label">{dose.label} · {dose.med}</span>
+                        <span className="dose-detail">{on ? `Taken (${puffLabel(puffs)})` : "Not taken"}</span>
+                      </span>
+                      <span className="dose-check">{on ? <Ico n="check" s={18} /> : <span className="empty-dot" />}</span>
+                    </button>
+                  </div>
+                  {on && (
+                    <div className="dose-time">
+                      <span className="dose-time-lab"><Ico n="clock" s={14} /> Time taken</span>
+                      <input className="dt-input time-in" type="time" value={vals[dose.id].time} onChange={(e) => setVals((p) => ({ ...p, [dose.id]: { ...p[dose.id], time: e.target.value } }))} />
+                    </div>
+                  )}
+                </div>
               );
             })}
           </Field>
-          <p className="backup-note">Tap each dose to flip it. The bar over that date in History updates straight away — green for both, amber for one, red for none.</p>
+          <p className="backup-note">Tap a dose to flip it; adjust the time it was taken below it. The calendar bar updates straight away.</p>
         </div>
       </div>
     </div>
